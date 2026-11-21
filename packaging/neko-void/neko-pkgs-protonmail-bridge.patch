@@ -1,0 +1,338 @@
+From 5b819af8d013144471ac0fac5f4c5350deb6ff27 Mon Sep 17 00:00:00 2001
+From: veroes21 <veroes21@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 19:58:02 +0000
+Subject: [PATCH] protonmail-bridge: add package template
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Build Proton Mail Bridge from source for Neko-Void with system Qt, gRPC,
+Protobuf and Sentry. Includes the two guarded patches needed until the
+upstream build-system changes are released.
+
+🤖 Generated with Codebuff
+Co-Authored-By: Codebuff <noreply@codebuff.com>
+---
+ protonmail-bridge/README.md                   |  44 ++++++++
+ .../files/protobuf-include.patch              |  35 ++++++
+ protonmail-bridge/files/system-deps.patch     | 102 +++++++++++++++++
+ protonmail-bridge/template                    | 105 ++++++++++++++++++
+ 4 files changed, 286 insertions(+)
+ create mode 100644 protonmail-bridge/README.md
+ create mode 100644 protonmail-bridge/files/protobuf-include.patch
+ create mode 100644 protonmail-bridge/files/system-deps.patch
+ create mode 100644 protonmail-bridge/template
+
+diff --git a/protonmail-bridge/README.md b/protonmail-bridge/README.md
+new file mode 100644
+index 0000000..1e04ff3
+--- /dev/null
++++ b/protonmail-bridge/README.md
+@@ -0,0 +1,44 @@
++# protonmail-bridge
++
++Proton Mail Bridge for Neko-Void, built from source and linked against the
++system Qt 6, gRPC, Protobuf and Sentry libraries.
++
++## Build
++
++Copy this directory into `srcpkgs/` of a void-packages checkout (or use vouru),
++then:
++
++```sh
++./xbps-src pkg protonmail-bridge
++sudo xbps-install --repository=hostdir/binpkgs protonmail-bridge
++```
++
++## Runtime
++
++Bridge needs a freedesktop secret service for the account credentials:
++
++```sh
++sudo xbps-install gnome-keyring   # or: pass
++```
++
++`/usr/bin/protonmail-bridge` starts the GUI, `/usr/bin/protonmail-bridge-core`
++starts the daemon/CLI. Bridge manages its own XDG autostart entry, so a runit
++service is not required on a desktop install.
++
++## Packaging notes
++
++* Proton's signed launcher is not packaged: it is only usable with Proton's
++  official release. The daemon is built from `cmd/Desktop-Bridge`.
++* `files/system-deps.patch` adds the `BRIDGE_USE_SYSTEM_DEPS` CMake option and
++  `files/protobuf-include.patch` passes Protobuf's include path to `protoc`.
++  Both are skipped once the corresponding changes are part of a Bridge release.
++* Update `version` and `checksum` together. The checksum is for
++  `https://github.com/ProtonMail/proton-bridge/archive/refs/tags/v<version>.tar.gz`.
++
++## Verification
++
++The template was tested on a Void x86_64 glibc userland with Go 1.27.4, Qt
++6.11.2, gRPC 1.83.0, Protobuf 35.1 and sentry-native 0.17.6: the daemon and GUI
++built from the pristine v3.27.2 tarball plus the two patches, `bridge --version`
++reported 3.27.2, the GUI started with `QT_QPA_PLATFORM=offscreen` and found the
++daemon, and `protonmail-bridge-core --version` worked from the installed layout.
+diff --git a/protonmail-bridge/files/protobuf-include.patch b/protonmail-bridge/files/protobuf-include.patch
+new file mode 100644
+index 0000000..3314459
+--- /dev/null
++++ b/protonmail-bridge/files/protobuf-include.patch
+@@ -0,0 +1,35 @@
++diff --git a/internal/frontend/bridge-gui/bridgepp/CMakeLists.txt b/internal/frontend/bridge-gui/bridgepp/CMakeLists.txt
++index f4a0a553..0c711474 100644
++--- a/internal/frontend/bridge-gui/bridgepp/CMakeLists.txt
+++++ b/internal/frontend/bridge-gui/bridgepp/CMakeLists.txt
++@@ -57,6 +57,14 @@ message(STATUS "Using gRPC ${gRPC_VERSION}")
++ find_program(PROTOC_EXE protoc REQUIRED)
++ message(STATUS "protoc found ${PROTOC_EXE}")
++ 
+++# protoc resolves imports such as google/protobuf/empty.proto on its own include
+++# path, so pass the Protobuf include directories explicitly. vcpkg happens to
+++# make them available, distribution packages do not.
+++set(PROTOBUF_INCLUDE_ARGS "")
+++foreach(protobuf_include_dir IN LISTS Protobuf_INCLUDE_DIRS)
+++    list(APPEND PROTOBUF_INCLUDE_ARGS "--proto_path=${protobuf_include_dir}")
+++endforeach()
+++
++ message(STATUS "grpc_cpp_plugin ${grpc_cpp_plugin}")
++ 
++ find_program(GRPC_CPP_PLUGIN grpc_cpp_plugin HINTS "${VCPKG_ROOT}/installed/arm64-osx/tools/grpc" "${VCPKG_ROOT}/installed/x64-osx/tools/grpc")
++@@ -88,6 +96,7 @@ add_custom_command(
++     ${PROTOC_EXE}
++     ARGS
++     --proto_path=${PROTO_DIR}
+++    ${PROTOBUF_INCLUDE_ARGS}
++     --plugin=protoc-gen-grpc="${GRPC_CPP_PLUGIN}"
++     --cpp_out=${GRPC_OUT_DIR}
++     --grpc_out=${GRPC_OUT_DIR}
++@@ -119,6 +128,7 @@ add_custom_command(
++     ${PROTOC_EXE}
++     ARGS
++     --proto_path=${FOCUS_PROTO_DIR}
+++    ${PROTOBUF_INCLUDE_ARGS}
++     --plugin=protoc-gen-grpc="${GRPC_CPP_PLUGIN}"
++     --cpp_out=${FOCUS_GRPC_OUT_DIR}
++     --grpc_out=${FOCUS_GRPC_OUT_DIR}
+diff --git a/protonmail-bridge/files/system-deps.patch b/protonmail-bridge/files/system-deps.patch
+new file mode 100644
+index 0000000..0eb90f1
+--- /dev/null
++++ b/protonmail-bridge/files/system-deps.patch
+@@ -0,0 +1,102 @@
++diff --git a/internal/frontend/bridge-gui/BridgeSetup.cmake b/internal/frontend/bridge-gui/BridgeSetup.cmake
++index c50b97c9..1b248be8 100644
++--- a/internal/frontend/bridge-gui/BridgeSetup.cmake
+++++ b/internal/frontend/bridge-gui/BridgeSetup.cmake
++@@ -48,48 +48,57 @@ endif()
++ #****************************************************************************************************************************************************
++ # vcpkg, toolchain, and architecture
++ #****************************************************************************************************************************************************
++-# We rely on vcpkg for to get gRPC / Protobuf
++-# run build.sh / build.ps1 to get gRPC / Protobuf and dependencies installed.
++-
++-if(WIN32)
++-    set(VCPKG_ROOT "${BRIDGE_REPO_ROOT}/extern/vcpkg-windows")
++-else()
++-    set(VCPKG_ROOT "${BRIDGE_REPO_ROOT}/extern/vcpkg")
++-endif()
++-message(STATUS "VCPKG_ROOT is ${VCPKG_ROOT}")
+++# We rely on vcpkg to get gRPC / Protobuf / Sentry by default.
+++# Run build.sh / build.ps1 to get gRPC / Protobuf and dependencies installed.
+++#
+++# Distributions ship these libraries as system packages and must not fetch them
+++# through vcpkg. Such builds can set -DBRIDGE_USE_SYSTEM_DEPS=ON and provide the
+++# CMake packages for Qt, gRPC, Protobuf and Sentry themselves.
+++option(BRIDGE_USE_SYSTEM_DEPS "Use system gRPC, Protobuf and Sentry instead of vcpkg" OFF)
++ 
++-if (WIN32)
++-    find_program(VCPKG_EXE "${VCPKG_ROOT}/vcpkg.exe")
+++if (BRIDGE_USE_SYSTEM_DEPS)
+++    message(STATUS "Using system-provided gRPC, Protobuf and Sentry (vcpkg disabled)")
++ else()
++-    find_program(VCPKG_EXE "${VCPKG_ROOT}/vcpkg")
++-endif()
++-if (NOT VCPKG_EXE)
++-    message(FATAL_ERROR "vcpkg is not installed. Run build.sh (macOS/Linux) or build.ps1 (Windows) first.")
++-endif()
+++    if(WIN32)
+++        set(VCPKG_ROOT "${BRIDGE_REPO_ROOT}/extern/vcpkg-windows")
+++    else()
+++        set(VCPKG_ROOT "${BRIDGE_REPO_ROOT}/extern/vcpkg")
+++    endif()
+++    message(STATUS "VCPKG_ROOT is ${VCPKG_ROOT}")
++ 
++-# For now we support only a single architecture for macOS (ARM64 or x86_64). We need to investigate how to build universal binaries with vcpkg.
++-if (APPLE)
++-    if (NOT DEFINED CMAKE_OSX_ARCHITECTURES)
++-        execute_process(COMMAND "uname" "-m" OUTPUT_VARIABLE UNAME_RESULT OUTPUT_STRIP_TRAILING_WHITESPACE)
++-        set(CMAKE_OSX_ARCHITECTURES ${UNAME_RESULT} CACHE STRING "osx_architectures")
+++    if (WIN32)
+++        find_program(VCPKG_EXE "${VCPKG_ROOT}/vcpkg.exe")
+++    else()
+++        find_program(VCPKG_EXE "${VCPKG_ROOT}/vcpkg")
+++    endif()
+++    if (NOT VCPKG_EXE)
+++        message(FATAL_ERROR "vcpkg is not installed. Run build.sh (macOS/Linux) or build.ps1 (Windows) first, or configure with -DBRIDGE_USE_SYSTEM_DEPS=ON to use system libraries.")
++     endif()
++ 
++-    if (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
++-        set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0)
++-        message(STATUS "Building for Apple Silicon Mac computers")
++-        set(VCPKG_TARGET_TRIPLET arm64-osx-min-11-0)
++-    elseif (CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
++-        set(CMAKE_OSX_DEPLOYMENT_TARGET 10.15)
++-        message(STATUS "Building for Intel based Mac computers")
++-        set(VCPKG_TARGET_TRIPLET x64-osx-min-10-15)
++-    else ()
++-        message(FATAL_ERROR "Unknown value for CMAKE_OSX_ARCHITECTURE. Please use one of \"arm64\" and \"x86_64\". Multiple architectures are not supported.")
++-    endif ()
++-endif()
+++    # For now we support only a single architecture for macOS (ARM64 or x86_64). We need to investigate how to build universal binaries with vcpkg.
+++    if (APPLE)
+++        if (NOT DEFINED CMAKE_OSX_ARCHITECTURES)
+++            execute_process(COMMAND "uname" "-m" OUTPUT_VARIABLE UNAME_RESULT OUTPUT_STRIP_TRAILING_WHITESPACE)
+++            set(CMAKE_OSX_ARCHITECTURES ${UNAME_RESULT} CACHE STRING "osx_architectures")
+++        endif()
++ 
++-if  (WIN32)
++-    message(STATUS "Building for Intel x64 Windows computers")
++-    set(VCPKG_TARGET_TRIPLET x64-windows)
++-endif()
+++        if (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+++            set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0)
+++            message(STATUS "Building for Apple Silicon Mac computers")
+++            set(VCPKG_TARGET_TRIPLET arm64-osx-min-11-0)
+++        elseif (CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+++            set(CMAKE_OSX_DEPLOYMENT_TARGET 10.15)
+++            message(STATUS "Building for Intel based Mac computers")
+++            set(VCPKG_TARGET_TRIPLET x64-osx-min-10-15)
+++        else ()
+++            message(FATAL_ERROR "Unknown value for CMAKE_OSX_ARCHITECTURE. Please use one of \"arm64\" and \"x86_64\". Multiple architectures are not supported.")
+++        endif ()
+++    endif()
+++
+++    if  (WIN32)
+++        message(STATUS "Building for Intel x64 Windows computers")
+++        set(VCPKG_TARGET_TRIPLET x64-windows)
+++    endif()
++ 
++-set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "toolchain")
++\ No newline at end of file
+++    set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "toolchain")
+++endif()
++\ No newline at end of file
+diff --git a/protonmail-bridge/template b/protonmail-bridge/template
+new file mode 100644
+index 0000000..00484b6
+--- /dev/null
++++ b/protonmail-bridge/template
+@@ -0,0 +1,105 @@
++# Template file for 'protonmail-bridge'
++pkgname=protonmail-bridge
++version=3.27.2
++revision=1
++archs="x86_64"
++wrksrc="proton-bridge-${version}"
++hostmakedepends="go pkgconf cmake ninja protobuf"
++makedepends="qt6-base-devel qt6-declarative-devel qt6-svg-devel
++ grpc-devel protobuf-devel sentry-native-devel abseil-cpp-devel
++ re2-devel c-ares-devel zlib-devel libfido2-devel libcbor-devel
++ openssl-devel sqlite-devel libsecret-devel MesaLib-devel libglvnd-devel"
++depends="qt6-base qt6-declarative qt6-svg grpc protobuf sentry-native
++ libfido2 libcbor openssl sqlite libsecret hicolor-icon-theme"
++short_desc="Proton Mail Bridge for e-mail clients"
++maintainer="veroes21 <veroes21@users.noreply.github.com>"
++license="GPL-3.0-or-later"
++homepage="https://github.com/ProtonMail/proton-bridge"
++changelog="https://raw.githubusercontent.com/ProtonMail/proton-bridge/master/Changelog.md"
++distfiles="https://github.com/ProtonMail/proton-bridge/archive/refs/tags/v${version}.tar.gz"
++checksum=720ced16f25b6f92758f2117edc9ccd7511c66202097ba6b1630ab29d6b097b6
++
++post_patch() {
++	# Distributions must not fetch gRPC/Protobuf/Sentry through vcpkg.
++	# The upstream build option BRIDGE_USE_SYSTEM_DEPS is not released yet,
++	# so add it here. Once it is part of a release this patch is skipped.
++	if ! grep -q BRIDGE_USE_SYSTEM_DEPS \
++		internal/frontend/bridge-gui/BridgeSetup.cmake; then
++		patch -Np1 -i "${FILESDIR}/system-deps.patch"
++	fi
++	if ! grep -q PROTOBUF_INCLUDE_ARGS \
++		internal/frontend/bridge-gui/bridgepp/CMakeLists.txt; then
++		patch -Np1 -i "${FILESDIR}/protobuf-include.patch"
++	fi
++}
++
++do_build() {
++	export GO111MODULE=on CGO_ENABLED=1
++	# Void's Go is built with -trimpath and needs GOROOT set explicitly.
++	[ -d /usr/lib/go ] && export GOROOT=/usr/lib/go
++	export GOFLAGS="-mod=mod"
++	# do_build runs inside the extracted source tree.
++	export GOCACHE="${PWD}/.gocache"
++	export GOPATH="${PWD}/.gopath"
++	export CGO_CFLAGS="${CFLAGS}"
++	export CGO_CPPFLAGS="${CPPFLAGS}"
++	export CGO_CXXFLAGS="${CXXFLAGS}"
++	export CGO_LDFLAGS="${LDFLAGS}"
++	export PATH="/usr/lib/qt6/bin:${PATH}"
++
++	# internal/bridge/credits.go is generated from go.mod and gitignored; the CLI
++	# frontend needs it.
++	(cd utils && ./credits.sh bridge)
++
++	# Build the daemon (and CLI) without Proton's signed launcher: distribution
++	# packages run the bridge binary directly from /usr/lib/protonmail/bridge.
++	local ldflags="-X github.com/ProtonMail/proton-bridge/v3/internal/constants.Version=${version}"
++	ldflags+=" -X github.com/ProtonMail/proton-bridge/v3/internal/constants.Revision=unknown"
++	ldflags+=" -X github.com/ProtonMail/proton-bridge/v3/internal/constants.Tag=v${version}"
++	ldflags+=" -X github.com/ProtonMail/proton-bridge/v3/internal/constants.BuildEnv=Neko-Void"
++	ldflags+=" -X 'github.com/ProtonMail/proton-bridge/v3/internal/constants.FullAppName=Proton Mail Bridge'"
++	go build -tags libsqlite3 -trimpath -buildmode=pie -ldflags "${ldflags}" \
++		-o bridge ./cmd/Desktop-Bridge/
++
++	# Link the GUI against the system Qt instead of bundling it. DeployLinux.cmake
++	# copies Qt and its QML plugins next to the binary, which is wrong for a
++	# distribution package.
++	: > internal/frontend/bridge-gui/bridge-gui/DeployLinux.cmake
++	cmake -S internal/frontend/bridge-gui/bridge-gui -B build -G Ninja \
++		-DCMAKE_BUILD_TYPE=Release \
++		-DCMAKE_SKIP_RPATH=YES \
++		-DBRIDGE_USE_SYSTEM_DEPS=ON \
++		-DBRIDGE_APP_FULL_NAME="Proton Mail Bridge" \
++		-DBRIDGE_VENDOR="Proton AG" \
++		-DBRIDGE_APP_VERSION="${version}" \
++		-DBRIDGE_REVISION=unknown \
++		-DBRIDGE_TAG="v${version}" \
++		-DBRIDGE_DSN_SENTRY= \
++		-DBRIDGE_BUILD_ENV=Neko-Void
++	cmake --build build
++}
++
++do_install() {
++	vmkdir usr/lib/protonmail/bridge
++	vinstall bridge 755 usr/lib/protonmail/bridge
++	vinstall build/bridge-gui 755 usr/lib/protonmail/bridge
++
++	vmkdir usr/bin
++	cat > "${DESTDIR}/usr/bin/protonmail-bridge" <<-'EOF'
++	#!/bin/sh
++	exec /usr/lib/protonmail/bridge/bridge-gui "$@"
++	EOF
++	chmod 755 "${DESTDIR}/usr/bin/protonmail-bridge"
++	cat > "${DESTDIR}/usr/bin/protonmail-bridge-core" <<-'EOF'
++	#!/bin/sh
++	exec /usr/lib/protonmail/bridge/bridge "$@"
++	EOF
++	chmod 755 "${DESTDIR}/usr/bin/protonmail-bridge-core"
++
++	vinstall dist/proton-bridge.desktop 644 usr/share/applications
++	vinstall dist/bridge.svg 644 usr/share/icons/hicolor/scalable/apps \
++		protonmail-bridge.svg
++
++	vlicense LICENSE
++	vdoc README.md Changelog.md
++}
+-- 
+2.43.0
+
