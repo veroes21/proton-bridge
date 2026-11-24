@@ -1,17 +1,11 @@
-From 5b819af8d013144471ac0fac5f4c5350deb6ff27 Mon Sep 17 00:00:00 2001
+From c0f7c8d4432d49787c881889e5c64fda13800e08 Mon Sep 17 00:00:00 2001
 From: veroes21 <veroes21@users.noreply.github.com>
 Date: Sat, 21 Nov 2026 19:58:02 +0000
 Subject: [PATCH] protonmail-bridge: add package template
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
 
 Build Proton Mail Bridge from source for Neko-Void with system Qt, gRPC,
 Protobuf and Sentry. Includes the two guarded patches needed until the
 upstream build-system changes are released.
-
-🤖 Generated with Codebuff
-Co-Authored-By: Codebuff <noreply@codebuff.com>
 ---
  protonmail-bridge/README.md                   |  44 ++++++++
  .../files/protobuf-include.patch              |  35 ++++++
